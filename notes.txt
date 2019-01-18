@@ -1,0 +1,305 @@
+- Supported types
+Realm supports the following basic types: bool, int, float, double, string, data, and date.
+
+bool properties map to JavaScript boolean values
+int, float, and double properties map to JavaScript number values. Internally ‘int’ and ‘double’ are stored as 64 bits while float is stored with 32 bits.
+string properties map to string
+data properties map to ArrayBuffer
+date properties map to Date
+- By default, basic types are non-optional and do not support storing null or undefined. Properties can be made optional by specifying the optional designator in your property definition, or with the shorthand syntax, by appending a ? to the type name:
+
+const PersonSchema = {
+  name: 'Person',
+  properties: {
+    realName:    'string', // required property
+    displayName: 'string?', // optional property
+    birthday:    {type: 'date', optional: true}, // optional property
+  }
+};
+- To-One Relationships
+For to-one relationships you specify the name property of the object schema you are referencing as the property’s type:
+
+const PersonSchema = {
+  name: 'Person',
+  properties: {
+    // The following property definitions are equivalent
+    car: {type: 'Car'},
+    van: 'Car',
+  }
+};
+When using object properties you need to make sure all referenced types are present in the schema used to open the Realm:
+
+// CarSchema is needed since PersonSchema contains properties of type 'Car'
+Realm.open({schema: [CarSchema, PersonSchema]})
+  .then(/* ... */);
+When accessing object properties, you can access nested properties using normal property syntax:
+
+realm.write(() => {
+  const nameString = person.car.name;
+  person.car.miles = 1100;
+
+  // create a new Car by setting the property to an object
+  // with all of the required fields
+  person.van = {make: 'Ford', model: 'Transit'};
+
+  // set both properties to the same car instance
+  person.car = person.van;
+});
+Object properties in Realm are always optional, do not have to be explicitly specified as such, and cannot be made required.
+
+- To-Many Relationships
+Just as with basic properties, you can also have a list of objects to form a to-many relationship. This is done by either appending [] to the name of the target object schema, or by setting the property type to list and specifying the objectType:
+
+const PersonSchema = {
+  name: 'Person',
+  properties: {
+    // The following property definitions are equivalent
+    cars: {type: 'list', objectType: 'Car'},
+    vans: 'Car[]'
+  }
+}
+
+let carList = person.cars;
+
+// Add new cars to the list
+realm.write(() => {
+  carList.push({make: 'Honda', model: 'Accord', miles: 100});
+  carList.push({make: 'Toyota', model: 'Prius', miles: 200});
+});
+
+let secondCar = carList[1].model;  // access using an array index
+Unlike other lists and to-one relationships, to-many relationships cannot be made optional.
+
+- Primary Keys
+You can specify the primaryKey property in an object model for string and int properties. Declaring a primary key allows objects to be looked up and updated efficiently and enforces uniqueness for each value. Once an object with a primary key has been added to a Realm the primary key cannot be changed.
+
+const BookSchema = {
+  name: 'Book',
+  primaryKey: 'id',
+  properties: {
+    id:    'int',    // primary key
+    title: 'string',
+    price: 'float'
+  }
+};
+Primary key properties are automatically indexed.
+
+- Creating and Updating Objects With Primary Keys
+If your model class includes a primary key, you can have Realm intelligently update or add objects based off of their primary key values. This is done by passing true as the third argument to the create method:
+
+realm.write(() => {
+  // Create a book object
+  realm.create('Book', {id: 1, title: 'Recipes', price: 35});
+
+  // Update book with new price keyed off the id
+  realm.create('Book', {id: 1, price: 55}, true);
+});
+In the example above, since an object already exists with the id value of 1 and we have passed in true for the third argument, the price property is updated rather than trying to create a new object. Since the title property is omitted the object retains the original value for this property. Note that when creating or updating objects with primary key properties the primary key must be specified.
+
+- Deleting Objects
+Objects can be deleted by calling the delete method within a write transaction.
+
+realm.write(() => {
+  // Create a book object
+  let book = realm.create('Book', {id: 1, title: 'Recipes', price: 35});
+
+  // Delete the book
+  realm.delete(book);
+
+  // Delete multiple books by passing in a `Results`, `List`,
+  // or JavaScript `Array`
+  let allBooks = realm.objects('Book');
+  realm.delete(allBooks); // Deletes all books
+});
+
+- Queries
+Queries allow you to get objects of a single type from a Realm, with the option of filtering and sorting those results. All queries (including queries and property access) are lazy in Realm. Data is only read when objects and properties are accessed. This allows you to represent large sets of data in a performant way.
+
+When performing queries you are returned a Results object. Results are simply a view of your data and are not mutable.
+
+The most basic method for retrieving objects from a Realm is using the objects method on a Realm to get all objects of a given type:
+
+let dogs = realm.objects('Dog'); // retrieves all Dogs from the Realm
+
+- Filtering
+You can get a filtered Results by calling the filtered method on a List or a Results with a query string.
+
+For example, the following would change our earlier example to retrieve all dogs with the color tan and names beginning with ‘B’:
+
+let dogs = realm.objects('Dog');
+let tanDogs = dogs.filtered('color = "tan" AND name BEGINSWITH "B"');
+The query language supported by Realm is inspired by Apple’s NSPredicate. Let’s briefly summarize the supported features and syntax:
+
+The comparison operands can be property names or constants. At least one of the operands must be a property name. Special constants are false, true, and null.
+Timestamps can be specified in the format “YYYY-MM-DD@HH:MM:SS:NANOSECONDS” where nanoseconds can be omitted.
+The comparison operators =/==, <=, <, >=, >, and !=/<> are supported for int, float, double, and Date property types, e.g. age = 45.
+The comparison operators =/== and !=/<> are supported for boolean (bool) properties.
+For string and data (ArrayBuffer) properties, the = (and ==), != (and <>), BEGINSWITH, CONTAINS, and ENDSWITH operators are supported, e.g. name CONTAINS 'Ja'.
+Wildcard comparison is possible for strings with the LIKE operator, e.g. name LIKE '*an?' to match “Jane”, “Dan”, “Shane”, etc.
+Case-insensitive comparisons for strings using [c], e.g. , CONTAINS[c] 'Ja'. Note that only characters “A-Z” and “a-z” will be ignored for case.
+Realm supports the following compound operators: AND/&&, OR/ ||, and NOT/!, e.g. name BEGINSWITH 'J' AND age >= 32.
+The aggregate expressions @count/@size, @min, @max, @sum and @avg are supported on list properties, e.g. employees.@count > 5 to find list of employees with more that 5 elements.
+The aggregate expression @count/@size on strings and binary properties, e.g. name.@size = 5 to find all with a name of 5 letters.
+A key path can follow list properties relationships, e.g. child.age >= 13 and cars.@avg.milage > 1000.
+A key path can also follow linking objects (backlinks), e.g. parents.age > 25 and parents.@count == 2.
+The $ operator can be used to substitute arguments, e.g. child.age >= $0 (see the example below).
+Sorting and find distinct values are possible with functions SORT and DISTINCT, e.g. age > 20 SORT(name ASC, age DESC) DISTINCT(name).
+The ordering for sorting can be one of the following case insensitive literals: ASC, ASCENDING, DESC, DESCENDING.
+Any number of properties can appear inside the brackets in a comma separated list.
+Any number of sort/distinct conditions can be indicated, they will be applied in the specified order.
+Sort or distinct cannot operate independently, these conditions must be attached to at least one query filter.
+An non-trivial example on how to query a Realm is:
+
+const Realm = require('realm');
+
+const CarSchema = {
+  name: 'Car',
+  properties: {
+    make:  'string',
+    model: 'string',
+    miles: {type: 'int', default: 0},
+  }
+};
+
+const PersonSchema = {
+  name: 'Person',
+  properties: {
+    name:     'string',
+    cars:     {type: 'list', objectType: 'Car'},
+  }
+};
+
+// Initialize a Realm with Car and Person models
+Realm.open({schema: [CarSchema, PersonSchema]})
+    .then(realm => {
+
+        // Add persons and their cars
+        realm.write(() => {
+            let john = realm.create('Person', {name: 'John', cars: []});
+            john.cars.push({make: 'Honda',  model: 'Accord', miles: 1500});
+            john.cars.push({make: 'Toyota', model: 'Prius',  miles: 2780});
+
+            let joan = realm.create('Person', {name: 'Joan', cars: []});
+            joan.cars.push({make: 'Skoda', model: 'Octavia', miles: 1120});
+            joan.cars.push({make: 'Ford',  model: 'Fiesta',  miles: 95});
+            joan.cars.push({make: 'VW',    model: 'Golf',    miles: 1270});
+
+            let jill = realm.create('Person', {name: 'Jill', cars: []});
+
+            let jack = realm.create('Person', {name: 'Jack', cars: []});
+            jack.cars.push({make: 'Porche', model: '911',    miles: 965});
+        });
+
+        // Find car owners
+        let carOwners = realm.objects('Person').filtered('cars.@size > 0');
+        console.log('Car owners')
+        for (let p of carOwners) {
+            console.log(`  ${p.name}`);
+        }
+
+        // Find who has been driver longer than average
+        let average = realm.objects('Car').avg('miles');
+        let longerThanAverage = realm.objects('Person').filtered('cars.@sum.miles > $0', average);
+        console.log(`Longer than average (${average})`)
+        for (let p of longerThanAverage) {
+            console.log(`  ${p.name}: ${p.cars.sum('miles')}`);
+        }
+
+        realm.close();
+});
+The output of the code snippet is:
+
+Car owners
+  John
+  Joan
+  Jack
+Longer than average (1288.3333333333333)
+  John: 4280
+  Joan: 2485
+  
+- Sorting
+Results allows you to specify a sort criteria and order based on a single or multiple properties. For example, the following call sorts the returned cars from the example above numerically by miles:
+
+let hondas = realm.objects('Car').filtered('make = "Honda"');
+
+// Sort Hondas by mileage
+let sortedHondas = hondas.sorted('miles');
+
+// Sort in descending order instead
+sortedHondas = hondas.sorted('miles', true);
+
+// Sort by price in descending order and then miles in ascending
+sortedHondas = hondas.sorted([['price', true], ['miles', false]]);
+Results can also be sorted on the values of objects linked to by the objects you’re sorting:
+
+let people = realm.objects('Person');
+
+// Sort people by the milage of their cars
+let sortedPeople = people.sorted('car.miles');
+Lists of basic types can be sorted by their values by calling sorted() without specifying a property:
+
+let person = realm.objects('Person')[0];
+let sortedTestScores = person.testScores.sorted();
+
+- Limiting Results
+Most other database technologies provide the ability to ‘paginate’ results from queries (such as the ‘LIMIT’ keyword in SQLite). This is often done out of necessity to avoid reading too much from disk, or pulling too many results into memory at once.
+
+Since queries in Realm are lazy, performing this sort of paginating behavior isn’t necessary at all, as Realm will only load objects from the results of the query once they are explicitly accessed.
+
+If for UI-related or other implementation reasons you require a specific subset of objects from a query, it’s as simple as taking the Results object, and reading out only the objects you need.
+
+let cars = realm.objects('Car');
+
+// get first 5 Car objects
+let firstCars = cars.slice(0, 5);
+
+- Migrations
+When working with a database your data model will most likely change over time. For example, suppose we have the following Person model:
+
+const PersonSchema = {
+  name: 'Person',
+  properties: {
+    firstName: 'string',
+    lastName: 'string',
+    age: 'int'
+  }
+}
+We want to update the data model to require a name property, rather than separate first and last names. To do this, we simply change the schema to the following:
+
+const PersonSchema = {
+  name: 'Person',
+  properties: {
+    name: 'string',
+    age: 'int'
+  }
+}
+At this point if you had saved any data with the previous model version there will be a mismatch between the new code and the old data Realm has stored on disk. When this occurs, an exception will be thrown when you try to open the existing Realm with the new schema unless you run a migration.
+
+- Performing a Migration
+You define a migration and the associated schema version by updating the schemaVersion and defining an optional migration function. Your migration function provides any logic needed to convert data models from previous schemas to the new schema. When opening a Realm the migration function will be applied to update the Realm to the given schema version only if a migration is needed.
+
+If no migration function is supplied then any new properties are automatically added and old properties are removed from the database when updating to the new schemaVersion. If you need to update old or populate new properties when upgrading your version you can do this in the migration function. For example, suppose we want to migrate the Person model declared earlier. You can populate the name property of the new schema using the old firstName and lastName properties:
+
+Realm.open({
+  schema: [PersonSchema],
+  schemaVersion: 1,
+  migration: (oldRealm, newRealm) => {
+    // only apply this change if upgrading to schemaVersion 1
+    if (oldRealm.schemaVersion < 1) {
+      const oldObjects = oldRealm.objects('Person');
+      const newObjects = newRealm.objects('Person');
+
+      // loop through all objects and set the name property in the new schema
+      for (let i = 0; i < oldObjects.length; i++) {
+        newObjects[i].name = oldObjects[i].firstName + ' ' + oldObjects[i].lastName;
+      }
+    }
+  }
+}).then(realm => {
+  const fullName = realm.objects('Person')[0].name;
+});
+Once the migration is successfully completed the Realm and all of its objects can be accessed as usual by your app.
+
+
+
+
