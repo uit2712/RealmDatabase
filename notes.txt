@@ -300,6 +300,6 @@ Realm.open({
 });
 Once the migration is successfully completed the Realm and all of its objects can be accessed as usual by your app.
 
-
+- 
 
 
